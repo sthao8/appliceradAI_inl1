@@ -6,11 +6,11 @@ class FileHandler:
     def __init__(self):
         self.lagerstatus_filepath = "lagerstatus.csv"
 
-    def read_in_lagerstatus(self, filepath: str = None):
-        with open(filepath or self.lagerstatus_filepath, "r") as lagerstatus_file:
+    def create_packages_from_file(self, filepath: str = None) -> list[Package]:
+        with open(filepath or self.lagerstatus_filepath, "r", encoding='utf-8') as lagerstatus_file:
             reader = csv.DictReader(lagerstatus_file)
 
-            packages_dict = {}
+            packages_list = []
 
             for package_info in reader:
                 package = Package(
@@ -20,6 +20,22 @@ class FileHandler:
                     int(package_info["Deadline"])
                 )
 
-                packages_dict[package.id] = package
+                packages_list.append(package)
 
-            return packages_dict
+            return packages_list
+
+    def update_stock_status(self, packages_list: list[Package], filepath: str = None):
+        headers = ["Paket_id", "Vikt", "Förtjänst", "Deadline"]
+
+        with open(filepath or self.lagerstatus_filepath, "w", newline='', encoding='utf-8') as lagerstatus_file:
+            writer = csv.DictWriter(lagerstatus_file, fieldnames=headers)
+            writer.writeheader()
+            for package in packages_list:
+                writer.writerow(
+                    {
+                        "Paket_id": package.id,
+                        "Vikt": package.weight,
+                        "Förtjänst": package.profit,
+                        "Deadline": package.days_to_deadline
+                    }
+                )
