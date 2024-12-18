@@ -39,9 +39,12 @@ class ShippingCompany:
         current_generation_avg = self.calculate_average_fitness(current_generation)
 
         average_fitness_delta = None
+        generation = 0
         while not average_fitness_delta or average_fitness_delta < Constants.AVG_FITNESS_DELTA_THRESHOLD.value:
+            generation += 1
             next_generation = self.generate_next_generation(current_generation)
             next_generation_avg = self.calculate_average_fitness(next_generation)
+            print(f"Generation {generation} fitness average: {next_generation_avg}")
             average_fitness_delta = abs(next_generation_avg - current_generation_avg)
             current_generation = next_generation
 
