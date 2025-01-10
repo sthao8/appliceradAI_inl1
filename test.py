@@ -1,16 +1,14 @@
 import unittest
 from unittest.mock import MagicMock
 
-from numpy import ndarray
 import numpy as np
-from unicodedata import decimal
 
 from filehandler import FileHandler, Package
-import os
 from decimal import Decimal
 from delivery_truck import DeliveryTruck
 from shipping_company import ShippingCompany, Solution
 
+# These tests are out of date and will not run!
 
 class TestFilehandler(unittest.TestCase):
     def setUp(self):
@@ -95,39 +93,65 @@ class TestPackage(unittest.TestCase):
     def test_1_late_fee_returns_0_if_not_late(self):
         package = Package(1, 1.0, Decimal(2), 0)
 
-        self.assertEqual(package.late_fee, 0)
+        self.assertEqual(package.late_fee, Decimal(0))
 
     def test_2_returns_late_fee_when_late(self):
         package = Package(1, 1.0, Decimal(2), -10)
 
-        self.assertEqual(package.late_fee, Decimal(-100))
+        self.assertEqual(package.late_fee, Decimal(100))
 
 class TestSolution(unittest.TestCase):
-    def test_1_evaluates_fitness_score_within_weight_limit(self):
-        test_bitarray = np.fromiter([True, True, False], bool)
-        package1 = MagicMock(spec=Package, weight=Decimal(1), profit=10)
-        package2 = MagicMock(spec=Package, weight=Decimal(1), profit=10)
-        package3 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
+    def test_1_normalizes_package_profit(self):
+        test_bitarray = np.fromiter([True, True, True], bool)
+        package1 = Package(1, 1, Decimal(2), 1)
+        package2 = Package(2, 1, Decimal(2), 1)
+        package3 = Package(3, 1, Decimal(2), -1)
         packages = [package1, package2, package3]
 
-        test_solution = Solution(packages, test_bitarray, 3, weight_limit=10)
+        test_solution = Solution(packages, test_bitarray, 10)
+
+        package1_norm_profit = Decimal(2 / 2 * (1-0.5)) + Decimal(0)
+        package3_norm_profit = Decimal(2 / 2 * (1 - 0.5)) + Decimal(1 * 0.5)
+
+        self.assertEqual(test_solution.normalize_net_profit(package1), package1_norm_profit)
+        self.assertEqual(test_solution.normalize_net_profit(package3), package3_norm_profit)
+
+    def test_2_evaluates_fitness_score_within_weight_limit(self):
+        test_bitarray = np.fromiter([True, True, True], bool)
+        package1 = Package(1, 1, Decimal(2), 1)
+        package2 = Package(2, 1, Decimal(2), 1)
+        package3 = Package(3, 100, Decimal(2), 1)
+        packages = [package1, package2, package3]
+
+        test_solution = Solution(packages, test_bitarray, 102)
 
         fitness = test_solution.fitness
 
-        self.assertEqual(fitness, 20)
+        self.assertEqual(fitness, Decimal(1.5))
 
-    def test_2_evaluates_fitness_score_above_weight_limit_returns_0(self):
+    def test_3_evaluates_fitness_score_above_weight_limit_returns_0(self):
         test_bitarray = np.fromiter([True, True, True], bool)
-        package1 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
-        package2 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
-        package3 = MagicMock(spec=Package, weight=Decimal(100), profit=2)
+        package1 = Package(1, 1, Decimal(2), 1)
+        package2 = Package(2, 1, Decimal(2), 1)
+        package3 = Package(3, 100, Decimal(2), 1)
         packages = [package1, package2, package3]
 
-        test_solution = Solution(packages, test_bitarray, 3, weight_limit=10)
+        test_solution = Solution(packages, test_bitarray, 10)
 
         fittest = test_solution.fitness
 
         self.assertEqual(fittest, 0)
+
+    def test_4_calculates_total_profit(self):
+        test_bitarray = np.fromiter([True, True, True], bool)
+        package1 = Package(1, 1, Decimal(2), 1)
+        package2 = Package(2, 1, Decimal(2), 1)
+        package3 = Package(3, 100, Decimal(2), 1)
+        packages = [package1, package2, package3]
+
+        test_solution = Solution(packages, test_bitarray, 10)
+
+        self.assertEqual(test_solution.average_profit_category, Decimal(6))
 
 class TestShippingCompany(unittest.TestCase):
     def test_1_creates_random_solutions(self):
@@ -138,8 +162,8 @@ class TestShippingCompany(unittest.TestCase):
                 f.write(str(rand_solution.bitarray) + "\n")
 
     def test_2_produces_two_crossover_children(self):
-        package1 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
-        package2 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
+        package1 = Package(1, 1, Decimal(2), 1)
+        package2 = Package(2, 1, Decimal(2), 1)
         packages = [package1, package2]
 
         parent1 = Solution(packages, np.fromiter([True, True], bool), 2, 100)
@@ -147,7 +171,7 @@ class TestShippingCompany(unittest.TestCase):
 
         shipping_company = ShippingCompany(packages)
 
-        children = shipping_company.produce_two_crossover_children([parent1, parent2], crossover_rate=100)
+        children = shipping_company.produce_two_children([parent1, parent2], crossover_rate=100)
 
         self.assertTrue(
             np.array_equal(
@@ -164,15 +188,15 @@ class TestShippingCompany(unittest.TestCase):
         )
 
     def test_3_mutates_child(self):
-        package1 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
-        package2 = MagicMock(spec=Package, weight=Decimal(1), profit=2)
+        package1 = Package(1, 1, Decimal(2), 1)
+        package2 = Package(2, 1, Decimal(2), 1)
         packages = [package1, package2]
 
         parent1 = Solution(packages, np.fromiter([True, True], bool), 2, 100)
 
         shipping_company = ShippingCompany(packages)
 
-        mutated_child = shipping_company.mutate_child(parent1, 100)
+        mutated_child = shipping_company.mutate_solution(parent1, 100)
 
         self.assertTrue(
             np.array_equal(
@@ -192,6 +216,7 @@ class TestShippingCompany(unittest.TestCase):
         average = shipping_company.calculate_average_fitness(generation)
 
         self.assertEqual(average, 10)
+
 
 if __name__ == "__main__":
     unittest.main()

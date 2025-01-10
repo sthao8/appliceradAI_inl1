@@ -1,5 +1,4 @@
-from typing import Union
-
+from collections import Counter
 
 from package import Package
 from constants import Constants
@@ -11,14 +10,30 @@ class DeliveryTruck:
         self.weight = 0
         self.packages = []
 
+    def total_price(self):
+        return sum([package.price_category for package in self.packages])
+
+    def total_late_fees(self):
+        return sum([package.late_fee for package in self.packages])
+
+    def price_category_counts(self):
+        return Counter([package.price_category for package in self.packages])
+
+    def deadlines_counts(self):
+        return Counter([package.deadline for package in self.packages])
+
     def load_package(self, package: Package):
-        if self.weight == self.max_weight or self.weight + package.weight > self.max_weight:
+        truck_weight = round(self.weight, 2)
+        if truck_weight + package.weight > self.max_weight:
+            print(f"truck current weight: {self.weight}, package weight: {package.weight}")
             raise ValueError("Loading package weight would exceed maximum weight")
 
-        self.weight += package.weight
+        self.weight = truck_weight + package.weight
         self.packages.append(package)
 
-    def unload_package(self, package: Package) -> None:
-        if not package in self.packages:
-            raise ValueError(f"Package {package} not found in truck")
-        self.packages.remove(package)
+    def empty_load(self):
+        self.weight = 0
+        self.packages = []
+
+    def print_report(self):
+        print(f"Truck {self.id}: {self.weight} kg, {self.total_price()} profit, {self.total_late_fees()} late fees, \nDistribution of price score: {self.price_category_counts()}\nDistribution of deadlines: {self.deadlines_counts()}\n")
