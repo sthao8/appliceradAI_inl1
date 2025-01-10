@@ -11,7 +11,7 @@ class DeliveryTruck:
         self.packages = []
 
     def total_price(self):
-        return sum([package.price for package in self.packages])
+        return sum([package.price_category for package in self.packages])
 
     def total_late_fees(self):
         return sum([package.late_fee for package in self.packages])
