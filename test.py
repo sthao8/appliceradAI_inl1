@@ -1,12 +1,9 @@
 import unittest
 from unittest.mock import MagicMock
 
-from numpy import ndarray
 import numpy as np
-from unicodedata import decimal
 
 from filehandler import FileHandler, Package
-import os
 from decimal import Decimal
 from delivery_truck import DeliveryTruck
 from shipping_company import ShippingCompany, Solution
@@ -115,8 +112,8 @@ class TestSolution(unittest.TestCase):
         package1_norm_profit = Decimal(2 / 2 * (1-0.5)) + Decimal(0)
         package3_norm_profit = Decimal(2 / 2 * (1 - 0.5)) + Decimal(1 * 0.5)
 
-        self.assertEqual(test_solution.normalize_total_profit(package1), package1_norm_profit)
-        self.assertEqual(test_solution.normalize_total_profit(package3), package3_norm_profit)
+        self.assertEqual(test_solution.normalize_net_profit(package1), package1_norm_profit)
+        self.assertEqual(test_solution.normalize_net_profit(package3), package3_norm_profit)
 
     def test_2_evaluates_fitness_score_within_weight_limit(self):
         test_bitarray = np.fromiter([True, True, True], bool)
@@ -153,7 +150,7 @@ class TestSolution(unittest.TestCase):
 
         test_solution = Solution(packages, test_bitarray, 10)
 
-        self.assertEqual(test_solution.total_profit, Decimal(6))
+        self.assertEqual(test_solution.average_profit_category, Decimal(6))
 
 class TestShippingCompany(unittest.TestCase):
     def test_1_creates_random_solutions(self):
@@ -173,7 +170,7 @@ class TestShippingCompany(unittest.TestCase):
 
         shipping_company = ShippingCompany(packages)
 
-        children = shipping_company.produce_two_crossover_children([parent1, parent2], crossover_rate=100)
+        children = shipping_company.produce_two_children([parent1, parent2], crossover_rate=100)
 
         self.assertTrue(
             np.array_equal(
@@ -198,7 +195,7 @@ class TestShippingCompany(unittest.TestCase):
 
         shipping_company = ShippingCompany(packages)
 
-        mutated_child = shipping_company.mutate_child(parent1, 100)
+        mutated_child = shipping_company.mutate_solution(parent1, 100)
 
         self.assertTrue(
             np.array_equal(
@@ -218,6 +215,7 @@ class TestShippingCompany(unittest.TestCase):
         average = shipping_company.calculate_average_fitness(generation)
 
         self.assertEqual(average, 10)
+
 
 if __name__ == "__main__":
     unittest.main()

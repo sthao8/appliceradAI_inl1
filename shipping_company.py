@@ -1,7 +1,8 @@
-from random import randint
+import copy
+from random import randint, uniform
+
 import numpy as np
-from numpy import ndarray, dtype, flatiter
-from decimal import Decimal
+from collections import Counter
 
 import heapq
 from filehandler import FileHandler, Package
@@ -11,181 +12,259 @@ from constants import Constants
 random_generator = np.random.default_rng()
 
 class Solution:
-    def __init__(self, packages: list[Package], bitarray: ndarray[bool] = None, weight_limit: float = None, late_fee_weight: float = Constants.LATE_FEE_WEIGHT.value):
+    def __init__(self, packages: list[Package], max_deadline: int, min_deadline:int, include_indices: list[int] = None, weight_limit: float = Constants.WEIGHT_LIMIT.value):
         self.packages = packages
-        self.amt_packages = len(packages)
-        self.weight_limit = weight_limit or Constants.WEIGHT_LIMIT.value
-        self.bitarray = bitarray if bitarray is not None else self.generate_random_solutions_limit_by_weight()
-        self._late_fee_weight = late_fee_weight
-        self.max_profit = max(self.packages, key=lambda package: package.profit).profit
-        self.max_late_fee = max(self.packages, key=lambda package: package.late_fee).late_fee
+        self.amt_packages = len(self.packages)
+        self.weight_limit = weight_limit
+
+        self.include_indices = include_indices if include_indices is not None else self.generate_random_solutions_limit_by_weight()
+        self.indices_dirty = True
+
+        self.max_deadline = max_deadline
+        self.min_deadline = min_deadline
+
+        self._total_weight = None
+        self._fitness = None
+        self._average_profit_category = None
 
     @property
-    def packages_subset(self):
-        subset = [self.packages[index] for index in self.bitarray if index]
-        return subset
+    def count_deadline(self):
+        return Counter([self.packages[index].deadline for index in self.include_indices])
 
     @property
-    def total_profit(self):
-        total_profit = 0
-        for include_package, package in zip(self.bitarray, self.packages):
-            if include_package:
-                total_profit += package.profit - package.late_fee
-        return total_profit
-
-    @property
-    def late_fee_weight(self) -> float:
-        return self._late_fee_weight
-
     def total_weight(self):
-        weight = 0
-        for package in self.packages_subset:
-            weight += package.weight
-        return weight
-
-    @late_fee_weight.setter
-    def late_fee_weight(self, value: float):
-        if not (0 <= value <= 1):
-            raise ValueError("late_fee_weight must be between 0 and 1")
-        self._late_fee_weight = value
+        self.recalculate()
+        return self._total_weight
 
     @property
-    def fitness(self) -> Decimal:
-        """Return a bitarray's total profit if total weight meets weight constraint, else 0"""
+    def average_profit_category(self):
+        self.recalculate()
+        return self._average_profit_category
+
+    @property
+    def average_deadline(self):
+        summed_deadline = sum([self.packages[index].deadline for index in self.include_indices])
+        return summed_deadline / len(self.include_indices)
+
+    @property
+    def fitness(self):
+        self.recalculate()
+        return self._fitness
+
+    def append_index(self, index: int):
+        self.include_indices.append(index)
+        self.indices_dirty = True
+
+    def remove_index(self, index: int):
+        self.include_indices.remove(index)
+        self.indices_dirty = True
+
+    def recalculate(self):
+        if not self.indices_dirty:
+            return
+
+        self.indices_dirty = False
+
+        weight = 0
+        for index in self.include_indices:
+            package = self.packages[index]
+            weight += package.weight
+        self._total_weight = weight
+
+        sum_price_cat = 0
+        for index in self.include_indices:
+            package = self.packages[index]
+            sum_price_cat += package.price_category
+
+        self._average_profit_category = sum_price_cat / len(self.include_indices)
+
         total_weight = 0
-        total_normalized_profit = 0
-        for include_package, package in zip(self.bitarray, self.packages):
-            if include_package:
-                total_weight += package.weight
-                total_normalized_profit += self.normalize_total_profit(package)
+        sum_packages_fitness = 0
 
-        return total_normalized_profit if total_weight <= self.weight_limit else 0
+        for index in self.include_indices:
+            package = self.packages[index]
+            total_weight += package.weight
+            sum_packages_fitness += package.recalculate_fitness(self.min_deadline, self.max_deadline)
 
-    def normalize_total_profit(self, package: Package) -> Decimal:
-        normalized_profit = Decimal(float(package.profit) / float(self.max_profit)) * Decimal(1 - self.late_fee_weight)
-        if self.max_late_fee > 0:
-            normalized_late_fee = Decimal(float(package.late_fee) / float(self.max_late_fee)) * Decimal(self.late_fee_weight)
-        else:
-            normalized_late_fee = 0
-        return normalized_profit + normalized_late_fee
+        normalized_total_weight = total_weight / Constants.WEIGHT_LIMIT.value * Constants.WEIGHT_WEIGHT.value
 
-    def generate_random_solutions_limit_by_weight(self):
+        self._fitness = sum_packages_fitness + normalized_total_weight if total_weight <= Constants.WEIGHT_LIMIT.value else 0
+
+    def generate_random_solutions_limit_by_weight(self) -> list[int]:
         ALLOWED_MISSES = 100
-        bitarray = np.full(self.amt_packages, False, dtype=bool) # TODO just return a list of indices that are true / packages are included
         total_weight = 0
-        seen_indices = set() # TODO just return this?
+        seen_indices = []
+        amt_seen_indices = 0
         miss = 0
-        while False in bitarray: # Only run when there are still packages to include
+        while amt_seen_indices < self.amt_packages: # Only run when there are still packages to include
             rand_index = randint(0, self.amt_packages - 1)
             if rand_index not in seen_indices:
-                if total_weight + self.packages[rand_index].weight > self.weight_limit:
-                    # TODO work on optimizing the remaining weight instead of just break
+                package = self.packages[rand_index]
+                if total_weight + package.weight > self.weight_limit:
                     miss += 1
-                    if miss >= ALLOWED_MISSES: break
+                    if miss > ALLOWED_MISSES: break
                 else:
-                    bitarray[rand_index] = True
-                    total_weight += self.packages[rand_index].weight
-                    seen_indices.add(rand_index)
+                    total_weight += package.weight
+                    seen_indices.append(rand_index)
+                    amt_seen_indices += 1
                     miss = 0
-        return bitarray
+        return seen_indices
 
 class ShippingCompany:
     def __init__(self, packages: list[Package] = None):
         self.filehandler = FileHandler()
-        self.packages = packages or self.filehandler.create_packages_from_file() # TODO we should also tie the amt_packages to this, so include in shipping company
+        self.packages = packages or self.filehandler.create_packages_from_file()
         self.fleet = [DeliveryTruck(id) for id in range(Constants.AMT_TRUCKS.value)]
-        self.initial_total_potential_profit = self.calculate_total_potential_profit_minus_loss()
+        self.initial_late_fees = self.calculate_late_fees(self.packages)
+
+    def calculate_late_fees(self, packages: list[Package]):
+        return sum([package.late_fee for package in packages])
+
+    def calculate_late_fees_fleet(self):
+        total_late_fees = 0
+        for truck in self.fleet:
+            total_late_fees += self.calculate_late_fees(truck.packages)
+        return total_late_fees
+
+    def calculate_profit_fleet(self):
+        total_profit = 0
+        for truck in self.fleet:
+            total_profit += self.sum_price_category(truck.packages)
+        return total_profit
+
+    def calculate_sum_price_inventory(self):
+        return self.sum_price_category(self.packages)
+
+    def sum_price_category(self, packages: list[Package]):
+        return sum([package.price_category for package in packages])
+
+    @property
+    def amt_packages(self) -> int:
+        return len(self.packages)
+
+    @property
+    def max_deadline(self):
+        return max(self.packages, key=lambda package: package.deadline).deadline
+
+    @property
+    def min_deadline(self):
+        return min(self.packages, key=lambda package: package.deadline).deadline
 
     def load_fleet(self):
         for truck in self.fleet:
             if self.packages:
                 print(f"Truck {truck.id}")
                 best_solution = self.genetic_algorithm()
-                package_indexes = [index for index, boolean_value in enumerate(best_solution.bitarray) if boolean_value]
-                for index in package_indexes[::-1]:
+                sorted_reversed_indices = sorted(best_solution.include_indices, reverse=True)
+                for index in sorted_reversed_indices:
                     package = self.packages.pop(index)
                     truck.load_package(package)
             print(f"Truck weight: {truck.weight}")
 
-    def calculate_total_profit(self):
-        return sum([truck.profit for truck in self.fleet])
-
-    def calculate_remaining_late_fees(self):
-        total_late_fees = 0
-        for package in self.packages:
-            if package.late_fee > 0:
-                total_late_fees += package.late_fee
-        return total_late_fees
-
-    def calculate_total_potential_profit_minus_loss(self):
-        return sum([package.total_effective_profit for package in self.packages])
-
     def genetic_algorithm(self) -> Solution:
-        """Using genetic algorithm to optimize package delegation"""
         current_generation = self.generate_random_solutions()
-        average_fitness_delta = None
         generation = 0
-        while average_fitness_delta is None or average_fitness_delta > Constants.AVG_FITNESS_DELTA_THRESHOLD.value:
-            next_generation = self.generate_next_generation(current_generation)
-            next_generation_avg = self.calculate_average_fitness(next_generation)
-            print(f"Generation {generation} fitness average: {next_generation_avg}")
-            current_generation_avg = self.calculate_average_fitness(current_generation)
+        current_generation_avg = self.calculate_average_fitness(current_generation)
+        current_best = max(current_generation, key=lambda x: x.fitness)
+        worst = min(current_generation, key=lambda x: x.fitness)
+        print(f"Generation {generation} fitness average: {current_generation_avg:.2f}, best: {current_best.fitness:.2f}, worst: {worst.fitness:.2f}")
 
-            average_fitness_delta = abs(next_generation_avg - current_generation_avg)
-            current_generation = next_generation
+        counter_avg_seen = 0
+        while counter_avg_seen < Constants.GENERATIONS.value and generation < Constants.MAX_GENERATIONS.value:
             generation += 1
 
-        best = max(current_generation, key=lambda x: x.fitness)
-        print(f"best fitness: {best.fitness}, solution weight: {best.total_weight()}")
-        return best
+            next_generation = self.generate_next_generation(current_generation, counter_avg_seen)
+            next_generation_avg = self.calculate_average_fitness(next_generation)
+            next_best = max(current_generation, key=lambda x: x.fitness)
+            worst = min(current_generation, key=lambda x: x.fitness)
+            print(f"Generation {generation} average fitness: {next_generation_avg:.2f}, best: {next_best.fitness:.2f}, worst: {worst.fitness:.2f}")
 
-    def generate_next_generation(self, old_generation: list[Solution], population_size: int = Constants.POPULATION_SIZE.value):
+            if abs(current_best.fitness - next_best.fitness) <= Constants.FITNESS_DELTA_THRESHOLD.value:
+                counter_avg_seen += 1
+            else:
+                counter_avg_seen = 0
+
+            current_generation = next_generation
+            current_best = next_best
+
+        best_solution = max(current_generation, key=lambda x: x.fitness)
+        print(f"best fitness: {best_solution.fitness:.2f}, weight: {best_solution.total_weight:.2f}, avg price category: {best_solution.average_profit_category:.2f}, avg deadline: {best_solution.average_deadline:.2f}")
+        print(f"package deadline distribution: {best_solution.count_deadline}")
+        return best_solution
+
+    def generate_next_generation(self, old_generation: list[Solution], counter_avg_seen: int):
         new_population = []
-        elite_solutions = heapq.nlargest(2, old_generation, key=lambda x: x.fitness)
-        new_population += elite_solutions
+        elite_solutions = heapq.nlargest(Constants.ELITISM_PARTICIPANTS.value, old_generation, key=lambda x: x.fitness)
+        new_population += [copy.deepcopy(solution) for solution in elite_solutions]
 
-        while len(new_population) != population_size:
+        while len(new_population) < Constants.POPULATION_SIZE.value:
             two_parents = self.select_tournament_winner_parents(old_generation, Constants.AMT_TOURNAMENT_PARTICIPANTS.value)
-            child1, child2 = self.produce_two_crossover_children(two_parents)
+            child1, child2 = self.produce_two_children(two_parents)
 
-            new_population.append(child1)
-            new_population.append(child2)
+            new_population.append(self.mutate_solution(child1, counter_avg_seen))
+            new_population.append(self.mutate_solution(child2, counter_avg_seen))
 
         return new_population
 
-    def calculate_average_fitness(self, generation: list[Solution]):
-        fitness_sum = sum([solution.fitness for solution in generation])
-        return fitness_sum / len(generation)
+    def calculate_average_fitness(self, population: list[Solution]):
+        return sum([solution.fitness for solution in population]) / len(population)
 
     def generate_random_solutions(self, population_size: int = Constants.POPULATION_SIZE.value) -> list[Solution]:
-        return [Solution(self.packages) for _ in range(population_size)]
+        return [Solution(self.packages, self.max_deadline, self.min_deadline) for _ in range(population_size)]
 
-    def select_tournament_winner_parents(self, sample_population: list[Solution], tournament_size: int):
+    def select_tournament_winner_parents(self, population: list[Solution], tournament_size: int):
         parents = []
         for _ in range(2):
-            participants = random_generator.choice(sample_population, size = tournament_size)
+            participants = random_generator.choice(population, size = tournament_size)
             parent = max(participants, key=lambda x: x.fitness)
             parents.append(parent)
         return parents
 
-    def produce_two_crossover_children(self, parents: list[Solution], crossover_rate: float = Constants.CROSSOVER_RATE.value) -> tuple[Solution, Solution]:
-        # TODO works only with even number elements???!
-        # TODO optimize the crossovers by swapper indices over or under upper / 2
+    def produce_two_children(self, parents: list[Solution], crossover_rate: float = Constants.CROSSOVER_RATE.value) -> tuple[Solution, Solution]:
         parent1, parent2 = parents
 
         if not random_generator.random() <= crossover_rate:
             return parent1, parent2
 
-        middle_index =  parent1.bitarray.size // 2
+        parent1_half_1, parent1_half_2 = self.splice_parent(parent1)
+        parent2_half_1, parent2_half_2 = self.splice_parent(parent2)
 
-        parent1_slice_1, parent1_slice_2 = parent1.bitarray[:middle_index], parent1.bitarray[middle_index:]
-        parent2_slice_1, parent2_slice_2 = parent2.bitarray[:middle_index], parent2.bitarray[middle_index:]
-
-        child1 = Solution(self.packages, np.concatenate((parent1_slice_1, parent2_slice_2)))
-        child2 = Solution(self.packages, np.concatenate((parent2_slice_1, parent1_slice_2)))
+        child1 = Solution(self.packages, self.max_deadline, self.min_deadline, include_indices=parent1_half_1 + parent2_half_2)
+        child2 = Solution(self.packages, self.max_deadline, self.min_deadline, include_indices=parent2_half_1 + parent1_half_2)
 
         return child1, child2
 
-    def mutate_child(self, child: Solution, mutation_rate: float = Constants.MUTATION_RATE.value):
-        mutation_rate_mask = np.random.random(child.bitarray.shape) <= mutation_rate #TODO make a loop instead of a mask
-        return np.invert(child.bitarray, where=mutation_rate_mask)
+    def splice_parent(self, parent: Solution) -> tuple[list[int], list[int]]:
+        half_1 = []
+        half_2 = []
+        middle_index = self.amt_packages // 2
+        for index in parent.include_indices:
+            if index < middle_index:
+                half_1.append(index)
+            else:
+                half_2.append(index)
+        return half_1, half_2
+
+    def mutate_solution(self, solution: Solution, counter_avg_seen):
+        solution_copy = copy.deepcopy(solution)
+
+        mutation_rate = Constants.MUTATION_RATE.value * counter_avg_seen
+        if mutation_rate > Constants.MAX_MUTATION_RATE.value: mutation_rate = Constants.MAX_MUTATION_RATE.value
+
+        for index in range(self.amt_packages):
+            if uniform(0, 1) <= mutation_rate:
+                if index in solution_copy.include_indices:
+                    solution_copy.remove_index(index)
+                else:
+                    solution_copy.append_index(index)
+        return solution_copy
+
+    def increment_late_days(self):
+        for package in self.packages:
+            package.deadline -= 1
+            print(package.deadline)
+        print("days to deadline decremented")
+
+    def reset_fleet(self):
+        for truck in self.fleet:
+            truck.empty_load()
