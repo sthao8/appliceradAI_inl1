@@ -8,6 +8,7 @@ from decimal import Decimal
 from delivery_truck import DeliveryTruck
 from shipping_company import ShippingCompany, Solution
 
+# These tests are out of date and will not run!
 
 class TestFilehandler(unittest.TestCase):
     def setUp(self):
